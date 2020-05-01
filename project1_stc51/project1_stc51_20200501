@@ -1,0 +1,220 @@
+/*********************************************************************************
+*实验名   ：点灯，流水灯，呼吸灯 + 上位机
+*实验效果	：上位机控制点灯， 上位机控制流水灯（循环位移法），上位机控制呼吸灯
+*
+*********************************************************************************/
+#include<reg52.h>
+#include<intrins.h>
+#include<string.h>
+#include"delay.h"
+
+bit startBit = 0;  				//串口接收开始标志位
+bit newLineReceived = 0; 		//串口一帧协议包接收完成
+unsigned char inputString[50];  //接收数据协议
+
+unsigned char orc = 0,num = 0, P1_oldValue = 0xff;
+
+unsigned char g_ledstate = 0; // 0 :灭 1:亮 2:流水灯 3: 呼吸灯
+//定义灯
+sbit LED0 = P1^0;
+sbit LED1 = P1^1;
+sbit LED2 = P1^2;
+sbit LED3 = P1^3;
+sbit LED4 = P1^4;
+sbit LED5 = P1^5;
+sbit LED6 = P1^6;
+sbit LED7 = P1^7;
+
+////////////////////////////////////////呼吸灯部分
+void pwm_init()
+{
+	TMOD |= 0x02;
+	TH0  = 0x9c;
+	TL0  = 0x9c;
+	ET0  = 1;
+	EA   = 1;
+	TR0  = 0;
+}
+void pwm_set(unsigned char pwm)
+{
+	orc = pwm;
+}
+void pwm_int() interrupt 1
+{
+	num++;
+	if(orc >= num)
+	{
+		P1 = P1_oldValue;
+	}
+	else
+	{
+		P1 = 0xff;
+	}
+		
+}
+////////////////////////////////////////////////////////////////
+
+//串口初始化
+void ComInit(void)
+{
+   
+   	SCON = 0x50; 	// SCON: 模式1, 8-bit UART, 使能接收
+	TMOD |= 0x20;
+	TH1=0xfd; 		//波特率9600 初值
+	TL1=0xfd;
+	TR1= 1;
+	EA = 1;	    	//开总中断
+	ES= 1; 			//打开串口中断
+
+
+}
+//串口发送函数
+void PutString(unsigned char *TXStr)  
+{                
+	ES=0;     
+	while(*TXStr!=0) 
+	{                      
+	  SBUF=*TXStr;
+	  while(TI==0);
+	  TI=0;    
+	  TXStr++;
+	}
+	ES=1; 
+}
+
+void main()
+{
+	unsigned char i;	
+	ComInit();
+	pwm_init();
+    P1=0Xff;//1111 1110
+    while(1)
+	{
+	    
+		if(g_ledstate == 2)
+		{
+			TR0 = 0;
+			delay(200);
+			P1=_crol_(P1, 1);     //循环移位函数 把P1寄存器内的数向左移1位	
+		}
+		else if(g_ledstate == 3)
+		{ 
+
+			TR0 = 1;
+			pwm_set(i++);
+		}
+		delay(10);
+		while (newLineReceived)  //协议数据接收完毕一包
+	   	{
+			//判断是否是51的协议
+			if(inputString[1] != '5' || inputString[2] != '1')
+			{
+			 	newLineReceived = 0;  
+		   		memset(inputString, 0x00, sizeof(inputString)); 
+				break; 
+			}
+			//判断是否是LED的协议数据
+		 	if(inputString[4] != 'L' && inputString[5] != 'E' && inputString[6] != 'D')
+			{
+				newLineReceived = 0;  
+		   		memset(inputString, 0x00, sizeof(inputString)); 
+				break;
+			}
+			
+			//读取功能执行
+			if(inputString[8] == '2')	 //流水灯
+			{
+				g_ledstate = 2;
+				newLineReceived = 0;  
+		   		memset(inputString, 0x00, sizeof(inputString)); 
+				P1=0Xfe;//1111 1110
+				break;	
+			}
+			else if(inputString[8] == '3') //呼吸灯
+			{
+				g_ledstate = 3;
+				newLineReceived = 0;  
+		   		memset(inputString, 0x00, sizeof(inputString)); 
+				P1_oldValue = P1;
+				break;	
+			}
+			else if(inputString[8] == '0') //停止所有其他特效功能
+			{  	
+				if(g_ledstate == 2)	  //关闭流水灯
+				{
+					P1 = 0Xff;//关闭所有灯	 
+					g_ledstate = 0;
+					newLineReceived = 0;  
+			   		memset(inputString, 0x00, sizeof(inputString)); 
+					break;
+				}
+				else if(g_ledstate == 3) //关闭呼吸灯
+				{
+					TR0 = 0;
+					P1 = P1_oldValue;//关闭所有灯	 
+					g_ledstate = 0;
+					newLineReceived = 0;  
+			   		memset(inputString, 0x00, sizeof(inputString)); 
+					break;	
+				}
+				g_ledstate = 0;
+			}
+			
+			switch(inputString[7])  //单独点灯
+			{
+				case '0': LED0 = (LED0 == 1)?0:1;break;  //反转电平 
+				case '1': LED1 = (LED1 == 1)?0:1;break;  //反转电平 
+				case '2': LED2 = (LED2 == 1)?0:1;break;  //反转电平 
+				case '3': LED3 = (LED3 == 1)?0:1;break;  //反转电平 
+				case '4': LED4 = (LED4 == 1)?0:1;break;  //反转电平 
+				case '5': LED5 = (LED5 == 1)?0:1;break;  //反转电平 
+				case '6': LED6 = (LED6 == 1)?0:1;break;  //反转电平 
+				case '7': LED7 = (LED7 == 1)?0:1;break;  //反转电平 
+				default :break;
+			}
+			
+			newLineReceived = 0;  
+	   		memset(inputString, 0x00, sizeof(inputString)); 
+			break;
+		}
+	}
+}
+
+/******************************************************************/
+/* 串口中断程序*/
+/******************************************************************/
+void UART_SER () interrupt 4
+{
+	unsigned char n; 	//定义临时变量
+	static int num = 0;
+
+	if(RI) 		//判断是接收中断产生
+	{
+		RI = 0; 	//标志位清零
+		n = SBUF; //读入缓冲区的值
+
+		//control=n;
+	    if(n == '$')
+	    {
+	      startBit = 1;
+		  num = 0;
+	    }
+	    if(startBit == 1)
+	    {
+	       inputString[num] = n;     
+	    }  
+	    if (n == '#') 
+	    {
+	       newLineReceived = 1; 
+	       startBit = 0;
+	    }
+		num++;
+		if(num >= 50)
+		{
+			num = 0;
+			startBit = 0;
+			newLineReceived	= 0;
+		}
+	}
+
+}
